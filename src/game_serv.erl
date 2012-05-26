@@ -85,7 +85,7 @@ loop(Params, State) when State#state.q =:= none ->
             loop(Params, State#state{qserv = NewQServ});
 
         {'EXIT', TcpServ, Reason} ->
-            io:format("WARNING: tcp server on port ~p died: ~p~n", [Params#params.port, Reason]),
+            io:format("WARNING: tcp server died: ~p~n", [Reason]),
             NewTcpServ = triv_tcp_serv:start_link(Params#params.port, self()),
             loop(Params, State#state{tcpserv = NewTcpServ});
 
@@ -107,7 +107,7 @@ loop(Params, State) ->
     TcpServ = State#state.tcpserv,
     receive
         {'EXIT', TcpServ, Reason} ->
-            io:format("WARNING: tcp server on port ~p died: ~p~n", [Params#params.port, Reason]),
+            io:format("WARNING: tcp server died: ~p~n", [Reason]),
             NewTcpServ = triv_tcp_serv:start_link(Params#params.port, self()),
             loop(Params, State#state{tcpserv = NewTcpServ});
 

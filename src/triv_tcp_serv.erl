@@ -12,15 +12,23 @@
 
 %% @doc Starts the TCP server on Port, linking it to the calling process
 start_link(Port, GameServ) ->
-    {ok, Socket} = gen_tcp:listen(Port, [{active, true}, {packet, line}, binary]),
-    spawn_link(?MODULE, accept_loop, [Socket, GameServ]).
+    case gen_tcp:listen(Port, [{active, true}, {packet, line}, {reuseaddr, true}, binary]) of
+        {error, Term} ->
+            error(Term);
+        {ok, Socket} ->
+            spawn_link(?MODULE, accept_loop, [Socket, GameServ])
+    end.
 
 %% @doc Loop for the process accepting new connections
 accept_loop(ListenSocket, GameServ) ->
-    {ok, AcceptSocket} = gen_tcp:accept(ListenSocket),
-    Pid = spawn(?MODULE, talk_loop, [AcceptSocket, GameServ]),
-    gen_tcp:controlling_process(AcceptSocket, Pid),
-    accept_loop(ListenSocket, GameServ).
+    case gen_tcp:accept(ListenSocket) of
+        {error, _} ->
+            accept_loop(ListenSocket, GameServ);
+        {ok, AcceptSocket} ->
+            Pid = spawn(?MODULE, talk_loop, [AcceptSocket, GameServ]),
+            gen_tcp:controlling_process(AcceptSocket, Pid),
+            accept_loop(ListenSocket, GameServ)
+    end.
 
 %% @doc Loop run in each individual client process
 talk_loop(Socket, GameServ) ->

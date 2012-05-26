@@ -23,13 +23,19 @@ start(Args) ->
 
         LoopFun = fun(Self, Pid) ->
             receive
-                {'EXIT', Pid, {{badmatch, {error, eaddrinuse}}, _}} ->
-                    io:format("Bad Listen: address in use~n"),
-                    erlang:halt(6);
-                {'EXIT', Pid, Reason} ->
-                    io:format("WARNING: restarting gameserv: ~p~n", [Reason]),
+                {timeout} ->
                     NewPid = game_serv:start_link(RoundTime, QsPerGame, Min, Max, Port, Fname),
-                    Self(Self, NewPid)
+                    Self(Self, NewPid);
+                {'EXIT', Pid, Reason} ->
+                    case Reason of
+                        {eaddrinuse, _} ->
+                            io:format("Bad Listen: address in use: ~p~n", [Reason]),
+                            erlang:halt(6);
+                        Other ->
+                            io:format("WARNING: restarting gameserv in 1sec: ~p~n", [Other]),
+                            timer:send_after(1000, self(), {timeout}),
+                            Self(Self, none)
+                    end
             end
         end,
         NewPid = game_serv:start_link(RoundTime, QsPerGame, Min, Max, Port, Fname),
