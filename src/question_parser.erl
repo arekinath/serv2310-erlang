@@ -1,9 +1,22 @@
+%% @doc Module for parsing a questions text file and populating a QServ
+%% @author arekinath
 -module(question_parser).
--export([load/2]).
--record(state, {lines=[], optnum=1, maxopt=none, correct=none, options=[], at=lines}).
 
-binrev(B) ->
-    binary:list_to_bin(lists:reverse(binary:bin_to_list(B))).
+-export([load/2]).
+
+-record(state, {
+    lines=[],       % list of lines in the question text
+    optnum=1,       % number of next option
+    maxopt=none,    % total number of options
+    correct=none,   % the correct option's number
+    options=[],     % list of options
+    at=lines        % parser state
+    }).
+
+%% @doc Loads the given text file in Fname and populates QServ with the questions found
+load(QServ, Fname) ->
+    {ok, F} = file:open(Fname, [read, binary]),
+    load(QServ, F, #state{}).
 
 load(QServ, F, State) when State#state.at =:= lines ->
     case file:read_line(F) of
@@ -17,6 +30,7 @@ load(QServ, F, State) when State#state.at =:= lines ->
             NewState = State#state{lines = NewLines},
             load(QServ, F, NewState)
     end;
+
 load(QServ, F, State) when State#state.at =:= opthead ->
     case file:read_line(F) of
         eof ->
@@ -28,6 +42,7 @@ load(QServ, F, State) when State#state.at =:= opthead ->
             NewState = State#state{at = opts, correct = Correct, maxopt=OptCount},
             load(QServ, F, NewState)
     end;
+
 load(QServ, F, State) when State#state.at =:= opts ->
     case file:read_line(F) of
         eof ->
@@ -61,6 +76,6 @@ load(QServ, F, State) when State#state.at =:= opts ->
             load(QServ, F, NewState)
     end.
 
-load(QServ, Fname) ->
-    {ok, F} = file:open(Fname, [read, binary]),
-    load(QServ, F, #state{}).
+%% @doc Reverses a binary
+binrev(B) ->
+    binary:list_to_bin(lists:reverse(binary:bin_to_list(B))).

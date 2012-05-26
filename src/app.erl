@@ -1,4 +1,7 @@
+%% @doc Application startup module and supervisor
+%% @author arekinath
 -module(app).
+
 -export([start/1, start/0]).
 
 start() ->
