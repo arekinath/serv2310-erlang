@@ -66,7 +66,7 @@ start_link(RoundTime, QsPerGame, MinPlayers, MaxPlayers, Port, Fname) ->
 
 %% @doc Spawns a timeouter that sends {self(),Msg} after Time to Pid
 timeouter(Time, Pid, Msg) ->
-    spawn_link(?MODULE, timeouter_run, [Time,Pid,Msg]).
+    spawn(?MODULE, timeouter_run, [Time,Pid,Msg]).
 timeouter_run(Time, Pid, Msg) ->
     receive
         {cancel} ->
@@ -112,7 +112,15 @@ loop(Params, State) when State#state.q =:= none ->
             % question in the game, we need to update the clients
             send_all(State#state.clients, {self(), scores, dict:to_list(State#state.stats)}),
             send_all(State#state.clients, {self(), question, Q}),
-            loop(Params, State#state{q = Q})
+            loop(Params, State#state{q = Q});
+
+        % Can happen because of an old round timeout that was queued up before we cancelled it
+        {_, round_timeout} ->
+            loop(Params, State);
+
+        Other ->
+            io:format("gameserv got unknown message: ~p~n", [Other]),
+            loop(Params, State)
     end;
 
 % Only when we have a question
@@ -226,5 +234,13 @@ loop(Params, State) ->
             NewState = State#state{clients = State#state.clients -- [Pid],
                                    stats = NewStats, round_timer = RoundTimer},
             Pid ! {self(), ok},
-            loop(Params, NewState)
+            loop(Params, NewState);
+
+        % From an old timer, was queued up when we cancelled it
+        {_, round_timeout} ->
+            loop(Params, State);
+
+        Other ->
+            io:format("gameserv got unknown message: ~p~n", [Other]),
+            loop(Params, State)
     end.
