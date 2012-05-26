@@ -16,64 +16,11 @@
 
 -record(stats, {played=0, won=0, disc=0, score=0}).
 
-%% @doc Sends the message Msg to all Pids in PidList
-send_all([], _) ->
-    done;
-send_all(PidList, Msg) ->
-    [Pid | Rest] = PidList,
-    Pid ! Msg,
-    send_all(Rest, Msg).
-
-%% @doc Takes a stats dict and returns a list of player names
-%%      that have the highest score
-winners(Stats) ->
-    List = dict:to_list(Stats),
-    Scores = lists:map(fun({_, #stats{score = Score}}) -> Score end, List),
-    MaxScore = lists:max(Scores),
-    {Winners, _} = lists:partition(fun({_, #stats{score = Score}}) -> Score =:= MaxScore end, List),
-    lists:map(fun({Player, _}) -> Player end, Winners).
-
-%% @doc Updates the given stats dict with the new "won" counts for
-%%      each player, called at the end of a game.
-update_with_winners(Stats) ->
-    Winners = winners(Stats),
-    Fun = fun(Name, StatsIn) ->
-        MyStats = dict:fetch(Name, StatsIn),
-        MyNewStats = MyStats#stats{won = MyStats#stats.won + 1},
-        dict:store(Name, MyNewStats, StatsIn)
-    end,
-    lists:foldl(Fun, Stats, Winners).
-
-%% @doc Queries the list of clients (pids) for their current status, returns
-%%      a list of {Name, Status} tuples.
-client_status(Clients) ->
-    Fun = fun(Client, RList) ->
-        Client ! {self(), status},
-        receive
-            {Client, status, Name, Word} ->
-                [{Name, Word} | RList]
-        after 100 ->
-           RList
-        end
-    end,
-    lists:foldl(Fun, [], Clients).
-
 %% @doc Starts the game server, linking it to the calling process
 start_link(RoundTime, QsPerGame, MinPlayers, MaxPlayers, Port, Fname) ->
     Params = #params{round_time = RoundTime, min = MinPlayers, qspergame = QsPerGame,
                      max = MaxPlayers, port = Port, fname = Fname},
     spawn_link(?MODULE, loop, [Params]).
-
-%% @doc Spawns a timeouter that sends {self(),Msg} after Time to Pid
-timeouter(Time, Pid, Msg) ->
-    spawn(?MODULE, timeouter_run, [Time,Pid,Msg]).
-timeouter_run(Time, Pid, Msg) ->
-    receive
-        {cancel} ->
-            done
-    after Time ->
-        Pid ! {self(), Msg}
-    end.
 
 %% @doc Starts the main loop of the game server
 loop(Params) ->
@@ -176,7 +123,7 @@ loop(Params, State) ->
                     end;
 
                 true ->
-                    RoundTimer = State#state.round_timer 
+                    RoundTimer = State#state.round_timer
                 end,
                 NewState = State#state{clients = [Pid | State#state.clients],
                                        stats = NewStats,
@@ -244,3 +191,57 @@ loop(Params, State) ->
             io:format("gameserv got unknown message: ~p~n", [Other]),
             loop(Params, State)
     end.
+
+%% @doc Spawns a timeouter that sends {self(),Msg} after Time to Pid.
+%%      At any time after creation, send the timer {cancel} to kill it
+timeouter(Time, Pid, Msg) ->
+    spawn(?MODULE, timeouter_run, [Time,Pid,Msg]).
+timeouter_run(Time, Pid, Msg) ->
+    receive
+        {cancel} ->
+            done
+    after Time ->
+        Pid ! {self(), Msg}
+    end.
+
+%% @doc Sends the message Msg to all Pids in PidList
+send_all([], _) ->
+    done;
+send_all(PidList, Msg) ->
+    [Pid | Rest] = PidList,
+    Pid ! Msg,
+    send_all(Rest, Msg).
+
+%% @doc Takes a stats dict and returns a list of player names
+%%      that have the highest score
+winners(Stats) ->
+    List = dict:to_list(Stats),
+    Scores = lists:map(fun({_, #stats{score = Score}}) -> Score end, List),
+    MaxScore = lists:max(Scores),
+    {Winners, _} = lists:partition(fun({_, #stats{score = Score}}) -> Score =:= MaxScore end, List),
+    lists:map(fun({Player, _}) -> Player end, Winners).
+
+%% @doc Updates the given stats dict with the new "won" counts for
+%%      each player, called at the end of a game.
+update_with_winners(Stats) ->
+    Winners = winners(Stats),
+    Fun = fun(Name, StatsIn) ->
+        MyStats = dict:fetch(Name, StatsIn),
+        MyNewStats = MyStats#stats{won = MyStats#stats.won + 1},
+        dict:store(Name, MyNewStats, StatsIn)
+    end,
+    lists:foldl(Fun, Stats, Winners).
+
+%% @doc Queries the list of clients (pids) for their current status, returns
+%%      a list of {Name, Status} tuples.
+client_status(Clients) ->
+    Fun = fun(Client, RList) ->
+        Client ! {self(), status},
+        receive
+            {Client, status, Name, Word} ->
+                [{Name, Word} | RList]
+        after 100 ->
+           RList
+        end
+    end,
+    lists:foldl(Fun, [], Clients).
