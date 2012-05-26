@@ -7,7 +7,8 @@
 -record(state, {
     name,               % name the client logged in with
     q=none,             % current question
-    status=timedout     % last answer status (timedout, incorrect, correct)
+    status=timedout,    % last answer status (timedout, incorrect, correct)
+    timer=none          % auth_timeout timer
     }).
 
 %% @doc Starts the TCP server on Port, linking it to the calling process
@@ -32,16 +33,33 @@ accept_loop(ListenSocket, GameServ) ->
 
 %% @doc Loop run in each individual client process
 talk_loop(Socket, GameServ) ->
-    talk_loop(Socket, GameServ, #state{name = none}).
+    Timer = timer:send_after(15000, self(), {auth_timeout}),
+    talk_loop(Socket, GameServ, #state{name = none, timer = Timer}).
 
 % Before we get the first line (no name set)
-talk_loop(Socket, GameServ, #state{name = none}) ->
+talk_loop(Socket, GameServ, #state{name = none, timer = Timer}) ->
     receive
+        {auth_timeout} ->
+            gen_tcp:send(Socket, <<"$timeout, no name or scores in 15sec\n">>),
+            gen_tcp:close(Socket);
+
         {tcp, Socket, <<"scores\n">>} ->
             GameServ ! {self(), scores},
             receive
                 {GameServ, scores, Scores} ->
                     gen_tcp:send(Socket, scores_to_bin(Scores))
+            after 500 ->
+                none
+            end,
+            gen_tcp:close(Socket);
+
+        {tcp, Socket, <<"::reset\n">>} ->
+            GameServ ! {self(), reset},
+            receive
+                {GameServ, ok} ->
+                    gen_tcp:send(Socket, <<"ok\n">>)
+            after 500 ->
+                none
             end,
             gen_tcp:close(Socket);
 
@@ -61,6 +79,7 @@ talk_loop(Socket, GameServ, #state{name = none}) ->
                         CountBin = binary:list_to_bin(integer_to_list(Count)),
                         MinBin = binary:list_to_bin(integer_to_list(Min)),
                         gen_tcp:send(Socket, <<"Hello ", Name/binary, " ", CountBin/binary, "/", MinBin/binary, "\n">>),
+                        timer:cancel(Timer),
                         talk_loop(Socket, GameServ, #state{name = Name});
 
                     {GameServ, full} ->

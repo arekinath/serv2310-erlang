@@ -47,14 +47,16 @@ update_with_winners(Stats) ->
 %% @doc Queries the list of clients (pids) for their current status, returns
 %%      a list of {Name, Status} tuples.
 client_status(Clients) ->
-    Fun = fun(Client) ->
+    Fun = fun(Client, RList) ->
         Client ! {self(), status},
         receive
             {Client, status, Name, Word} ->
-                {Name, Word}
+                [{Name, Word} | RList]
+        after 500 ->
+           RList
         end
     end,
-    lists:map(Fun, Clients).
+    lists:foldl(Fun, [], Clients).
 
 %% @doc Starts the game server, linking it to the calling process
 start_link(RoundTime, QsPerGame, MinPlayers, MaxPlayers, Port, Fname) ->
@@ -116,6 +118,11 @@ loop(Params, State) ->
             Pid ! {self(), scores, dict:to_list(State#state.stats)},
             loop(Params, State);
 
+        % Reset stats
+        {Pid, reset} ->
+            Pid ! {self(), ok},
+            loop(Params, State#state{stats = dict:new()});
+
         % Sent by a tcp_serv process when the user wants to log in
         % We return with {self(), ok, N, M} or {self(), full}
         {Pid, new_player, Name} ->
@@ -133,19 +140,23 @@ loop(Params, State) ->
                 Pid ! {self(), ok, length(State#state.clients)+1, Params#params.min},
 
                 if length(State#state.clients)+1 > Params#params.min ->
-                    Pid ! {self(), scores, dict:to_list(State#state.stats)},
+                    Pid ! {self(), scores, dict:to_list(NewStats)},
                     Pid ! {self(), question, State#state.q},
                     RoundTimer = State#state.round_timer;
 
                 length(State#state.clients)+1 == Params#params.min ->
-                    send_all(State#state.clients, {self(), scores, dict:to_list(State#state.stats)}),
+                    send_all(State#state.clients, {self(), scores, dict:to_list(NewStats)}),
                     send_all(State#state.clients, {self(), question, State#state.q}),
-                    Pid ! {self(), scores, dict:to_list(State#state.stats)},
+                    Pid ! {self(), scores, dict:to_list(NewStats)},
                     Pid ! {self(), question, State#state.q},
-                    RoundTimer = erlang:send_after(Params#params.round_time * 1000, self(), {round_timeout});
+                    RoundTimer = if State#state.round_timer =:= none ->
+                        timer:send_after(Params#params.round_time * 1000, self(), {round_timeout});
+                    true ->
+                        State#state.round_timer
+                    end;
 
                 true ->
-                    RoundTimer = none
+                    RoundTimer = State#state.round_timer 
                 end,
                 NewState = State#state{clients = [Pid | State#state.clients],
                                        stats = NewStats,
@@ -173,8 +184,8 @@ loop(Params, State) ->
             if State#state.done + 1 >= Params#params.qspergame ->
                 NewStats = update_with_winners(StatsWithCorrect),
 
-                send_all(State#state.clients, {self(), correct, client_status(State#state.clients)}),
                 send_all(State#state.clients, {self(), winners, winners(NewStats)}),
+                send_all(State#state.clients, {self(), correct, client_status(State#state.clients)}),
                 send_all(State#state.clients, {self(), scores, dict:to_list(NewStats)}),
                 send_all(State#state.clients, {self(), bye}),
 
@@ -190,8 +201,14 @@ loop(Params, State) ->
         {Pid, exit_player, Name} ->
             Stats = dict:fetch(Name, State#state.stats),
             NewStats = dict:store(Name, Stats#stats{disc = Stats#stats.disc + 1}, State#state.stats),
+            if length(State#state.clients) - 1 < Params#params.min ->
+                timer:cancel(State#state.round_timer),
+                RoundTimer = none;
+            true ->
+                RoundTimer = State#state.round_timer
+            end,
             NewState = State#state{clients = State#state.clients -- [Pid],
-                                   stats = NewStats},
+                                   stats = NewStats, round_timer = RoundTimer},
             Pid ! {self(), ok},
             loop(Params, NewState)
     end.
