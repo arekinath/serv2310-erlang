@@ -2,7 +2,7 @@
 %% @author arekinath
 -module(game_serv).
 
--export([loop/1, start_link/6]).
+-export([loop/1, start_link/6, timeouter_run/3]).
 
 -record(params, {round_time, qspergame, min, max, port, fname}).
 
@@ -52,7 +52,7 @@ client_status(Clients) ->
         receive
             {Client, status, Name, Word} ->
                 [{Name, Word} | RList]
-        after 500 ->
+        after 100 ->
            RList
         end
     end,
@@ -63,6 +63,17 @@ start_link(RoundTime, QsPerGame, MinPlayers, MaxPlayers, Port, Fname) ->
     Params = #params{round_time = RoundTime, min = MinPlayers, qspergame = QsPerGame,
                      max = MaxPlayers, port = Port, fname = Fname},
     spawn_link(?MODULE, loop, [Params]).
+
+%% @doc Spawns a timeouter that sends {self(),Msg} after Time to Pid
+timeouter(Time, Pid, Msg) ->
+    spawn_link(?MODULE, timeouter_run, [Time,Pid,Msg]).
+timeouter_run(Time, Pid, Msg) ->
+    receive
+        {cancel} ->
+            done
+    after Time ->
+        Pid ! {self(), Msg}
+    end.
 
 %% @doc Starts the main loop of the game server
 loop(Params) ->
@@ -107,6 +118,7 @@ loop(Params, State) when State#state.q =:= none ->
 % Only when we have a question
 loop(Params, State) ->
     TcpServ = State#state.tcpserv,
+    OldTimer = State#state.round_timer,
     receive
         {'EXIT', TcpServ, Reason} ->
             io:format("WARNING: tcp server died: ~p~n", [Reason]),
@@ -150,7 +162,7 @@ loop(Params, State) ->
                     Pid ! {self(), scores, dict:to_list(NewStats)},
                     Pid ! {self(), question, State#state.q},
                     RoundTimer = if State#state.round_timer =:= none ->
-                        timer:send_after(Params#params.round_time * 1000, self(), {round_timeout});
+                        timeouter(Params#params.round_time * 1000, self(), round_timeout);
                     true ->
                         State#state.round_timer
                     end;
@@ -165,7 +177,7 @@ loop(Params, State) ->
             end;
 
         % Received from the timer that goes off when this question has expired
-        {round_timeout} ->
+        {OldTimer, round_timeout} ->
 
             % Find the clients that answered correctly and update their scores
             Status = client_status(State#state.clients),
@@ -193,7 +205,7 @@ loop(Params, State) ->
             true ->
                 send_all(State#state.clients, {self(), correct, client_status(State#state.clients)}),
 
-                RoundTimer = erlang:send_after(Params#params.round_time * 1000, self(), {round_timeout}),
+                RoundTimer = timeouter(Params#params.round_time * 1000, self(), round_timeout),
                 loop(Params, State#state{stats = StatsWithCorrect, done = State#state.done + 1, q = none, round_timer = RoundTimer})
             end;
 
@@ -202,7 +214,11 @@ loop(Params, State) ->
             Stats = dict:fetch(Name, State#state.stats),
             NewStats = dict:store(Name, Stats#stats{disc = Stats#stats.disc + 1}, State#state.stats),
             if length(State#state.clients) - 1 < Params#params.min ->
-                timer:cancel(State#state.round_timer),
+                if State#state.round_timer =/= none ->
+                    State#state.round_timer ! {cancel};
+                true ->
+                    none
+                end,
                 RoundTimer = none;
             true ->
                 RoundTimer = State#state.round_timer

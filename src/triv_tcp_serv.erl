@@ -34,6 +34,7 @@ accept_loop(ListenSocket, GameServ) ->
 %% @doc Loop run in each individual client process
 talk_loop(Socket, GameServ) ->
     Timer = timer:send_after(15000, self(), {auth_timeout}),
+    inet:setopts(Socket, [{packet_size, 32000}, {recbuf, 32000}]),
     talk_loop(Socket, GameServ, #state{name = none, timer = Timer}).
 
 % Before we get the first line (no name set)
@@ -65,8 +66,13 @@ talk_loop(Socket, GameServ, #state{name = none, timer = Timer}) ->
 
         {tcp, Socket, Line} ->
             % Strip off the newline
-            <<"\n", TextRev/binary>> = binrev(Line),
-            Name = binrev(TextRev),
+            Name = case binrev(Line) of
+                <<"\n", TextRev/binary>> ->
+                    binrev(TextRev);
+                _ ->
+                    gen_tcp:send(Socket, <<"$name too long: I only cope with the kernel buffer size :(\n">>),
+                    <<"">>
+            end,
 
             if Name =:= <<"">> ->
                 % Empty names are a protocol violation
