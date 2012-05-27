@@ -1,6 +1,6 @@
 %% @doc Module for parsing a questions text file and populating a QServ
 %% @author arekinath
--module(question_parser).
+-module(qfile_parser).
 
 -export([load/2]).
 
@@ -48,20 +48,13 @@ load(QServ, F, State) when State#state.at =:= opts ->
         eof ->
             OptNum = binary:list_to_bin(integer_to_list(State#state.optnum - 1)),
             if OptNum =:= State#state.maxopt ->
-                QServ ! {self(), add, State#state.lines, lists:reverse(State#state.options), State#state.correct},
-                receive
-                    {QServ, ok} ->
-                        done
-                end;
+                question_db:add(QServ, {State#state.lines, lists:reverse(State#state.options), State#state.correct});
             true ->
                 done
             end;
         {ok, <<"\n">>} ->
-            QServ ! {self(), add, State#state.lines, lists:reverse(State#state.options), State#state.correct},
-            receive
-                {QServ, ok} ->
-                    load(QServ, F, #state{})
-            end;
+            question_db:add(QServ, {State#state.lines, lists:reverse(State#state.options), State#state.correct}),
+            load(QServ, F, #state{});
         {ok, LineWithEnd} ->
             <<"\n", LineRev/binary>> = binrev(LineWithEnd),
             Line = binrev(LineRev),
