@@ -1,6 +1,6 @@
 -module(game).
 -behaviour(gen_server).
--export([start_link/7, question_finished/2, player_connect/2, player_disconnect/2, take_link/2]).
+-export([start_link/7, question_finished/3, player_connect/2, player_disconnect/2, take_link/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 %% @doc Starts the game server, linked to the calling process
@@ -8,8 +8,8 @@ start_link(Min, Max, Qs, Time, Port, Fname, Scores) ->
     gen_server:start_link(?MODULE, [Min, Max, Qs, Time, Port, Fname, Scores], []).
 
 %% @doc Called by the question proc when it's finished
-question_finished(Pid, StatusList) ->
-    gen_server:cast(Pid, {question_finished, StatusList}).
+question_finished(Pid, Players, StatusList) ->
+    gen_server:cast(Pid, {question_finished, Players, StatusList}).
 
 %% @doc Tries to connect a new player. Returns {ok, Count, Min} on success, or 'full'
 player_connect(Pid, Name) ->
@@ -70,7 +70,7 @@ handle_call({player_connect, Name}, {Pid, _Ref}, State) ->
         {reply, {ok, length(Players) + 1, Min}, NewState}
     end.
 
-handle_cast({question_finished, StatusList}, State) ->
+handle_cast({question_finished, QPlayers, StatusList}, State) ->
     #state{players = Players, min = Min, scores = Scores, round = Round, maxqs = MaxQs, qdb = Qdb, time = Time} = State,
     % Update the scores of the players
     lists:foreach(fun({Player, Status}) ->
@@ -116,14 +116,14 @@ handle_cast({question_finished, StatusList}, State) ->
             player:send_correct(Player, StatusList),
             player:send_scores(Player),
             player:disconnect(Player)
-        end, Players),
+        end, QPlayers),
 
-        {noreply, State#state{round = 1, players = [], question = none}};
+        {noreply, State#state{round = 1, players = Players -- QPlayers, question = none}};
 
     true ->
         lists:foreach(fun(Player) ->
             player:send_correct(Player, StatusList)
-        end, Players),
+        end, QPlayers),
 
         if length(Players) >= Min ->
             {ok, Q} = question_db:get_random(Qdb),

@@ -72,7 +72,7 @@ terminate(normal, State) ->
     lists:foreach(fun(Player) ->
         player:end_question(Player)
     end, Players),
-    game:question_finished(Game, dict:to_list(Status)),
+    game:question_finished(Game, Players, dict:to_list(Status)),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
