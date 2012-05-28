@@ -87,7 +87,13 @@ handle_cast({question_finished, StatusList}, State) ->
             {stats, _, _, _, Score} = scores:get(Scores, Player),
             Score
         end, StatusList),
-        MaxScore = lists:max(PScores),
+
+        MaxScore = if length(PScores) > 0 ->
+            lists:max(PScores);
+        true ->
+            -1
+        end,
+
         Winners = lists:foldl(fun({Player, _}, Acc) ->
             {stats, _, _, _, Score} = scores:get(Scores, Player),
             if Score =:= MaxScore ->
